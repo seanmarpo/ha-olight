@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
@@ -90,6 +91,10 @@ async def test_reconfigure_updates_host_and_key_in_place(
     assert entry.data[CONF_HOST] == "10.0.0.7"
     assert entry.data[CONF_LOCAL_KEY] == "fedcba9876543210"
     assert entry.data[CONF_DEVICE_ID] == DEVICE_ID  # never changes: it is the identity
+    # The reload is scheduled in the background. Wait for it, or it can run during teardown
+    # after HA has stopped and leave the heartbeat timer behind.
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
 
 
 async def test_reconfigure_rejects_a_key_that_does_not_work(

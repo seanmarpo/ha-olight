@@ -8,13 +8,17 @@
 #
 #   ./tools/extract_key.sh              # macOS (Intel or Apple Silicon) or Linux with KVM
 #   ANDROID_SDK_ROOT=~/sdk ./tools/extract_key.sh
+#   PLAYSTORE=1 ./tools/extract_key.sh                          # install Olight from Google Play
+#   OLIGHT_APK=~/Downloads/olight.xapk ./tools/extract_key.sh   # use an app file you downloaded
 #
 # Output: prints the device id and local key, and writes them to tools/ostation-key.env.
 set -euo pipefail
 
 APP_PKG="com.olight.omall"
 API_LEVEL="${API_LEVEL:-34}"
-AVD_NAME="${AVD_NAME:-olight}"
+PLAYSTORE="${PLAYSTORE:-0}"
+OLIGHT_APK="${OLIGHT_APK:-}"
+if [ "$PLAYSTORE" = 1 ]; then AVD_NAME="${AVD_NAME:-olight-play}"; else AVD_NAME="${AVD_NAME:-olight}"; fi
 SDK="${ANDROID_SDK_ROOT:-$HOME/android-sdk}"
 OUT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d)"
@@ -34,7 +38,8 @@ case "$(uname -m)" in
   x86_64)        ABI=x86_64 ;;
   *) die "unsupported CPU $(uname -m)" ;;
 esac
-IMAGE="system-images;android-${API_LEVEL};google_apis;${ABI}"
+if [ "$PLAYSTORE" = 1 ]; then TAG=google_apis_playstore; else TAG=google_apis; fi
+IMAGE="system-images;android-${API_LEVEL};${TAG};${ABI}"
 say "host=$HOST abi=$ABI image=$IMAGE sdk=$SDK"
 
 # --- Java ---------------------------------------------------------------------------------------
@@ -55,9 +60,19 @@ if ! command -v sdkmanager >/dev/null; then
   say "downloading Android command-line tools into $SDK"
   mkdir -p "$SDK/cmdline-tools"
   # Google publishes one zip per host; the build number changes, so resolve it from the index page.
-  page=$(curl -fsSL https://developer.android.com/studio)
-  url=$(printf '%s' "$page" | grep -oE "https://dl.google.com/android/repository/commandlinetools-${HOST}-[0-9]+_latest.zip" | head -1)
-  [ -n "$url" ] || die "could not find the command-line tools download URL"
+  # macOS zips are per-arch (mac_arm64 / mac_x86_64) on current releases, plain "mac" on older ones.
+  case "$HOST-$ABI" in
+    mac-arm64-v8a) CLT_HOSTS="mac_arm64 mac" ;;
+    mac-x86_64)    CLT_HOSTS="mac_x86_64 mac" ;;
+    *)             CLT_HOSTS="$HOST" ;;
+  esac
+  page=$(curl -fsSL https://developer.android.com/studio) || die "could not reach developer.android.com"
+  url=""
+  for h in $CLT_HOSTS; do
+    url=$(printf '%s' "$page" | grep -oE "https://dl.google.com/android/repository/commandlinetools-${h}-[0-9]+_latest.zip" | head -1 || true)
+    [ -n "$url" ] && break
+  done
+  [ -n "$url" ] || die "could not find the command-line tools download URL (tried: $CLT_HOSTS)"
   curl -fsSL "$url" -o "$WORK/clt.zip"
   unzip -q "$WORK/clt.zip" -d "$WORK/clt"
   rm -rf "$SDK/cmdline-tools/latest" && mv "$WORK/clt/cmdline-tools" "$SDK/cmdline-tools/latest"
@@ -74,11 +89,27 @@ if ! avdmanager list avd 2>/dev/null | grep -q "Name: ${AVD_NAME}\$"; then
 fi
 
 # --- the app ------------------------------------------------------------------------------------
-say "downloading the Olight app"
-curl -fsSL -A "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36" \
-  "https://d.apkpure.com/b/XAPK/${APP_PKG}?version=latest" -o "$WORK/olight.xapk"
-unzip -q "$WORK/olight.xapk" -d "$WORK/xapk"
-ls "$WORK/xapk"/*.apk >/dev/null 2>&1 || die "the download was not an XAPK bundle; fetch the app manually and install with 'adb install-multiple'"
+# Three sources: Google Play inside the emulator (PLAYSTORE=1), a file you downloaded (OLIGHT_APK),
+# or an automatic APKPure download (often refused for scripts — it then points at the other two).
+mkdir -p "$WORK/xapk"
+if [ "$PLAYSTORE" = 1 ]; then
+  say "Play Store mode: you will install Olight from Google Play inside the emulator"
+elif [ -n "$OLIGHT_APK" ]; then
+  [ -f "$OLIGHT_APK" ] || die "OLIGHT_APK=$OLIGHT_APK does not exist"
+  case "$OLIGHT_APK" in
+    *.apk) cp "$OLIGHT_APK" "$WORK/xapk/base.apk" ;;
+    *)     unzip -q "$OLIGHT_APK" -d "$WORK/xapk" ;;   # .xapk / .apks / .apkm bundles are zips
+  esac
+  ls "$WORK/xapk"/*.apk >/dev/null 2>&1 || die "no .apk found inside $OLIGHT_APK"
+else
+  say "downloading the Olight app"
+  curl -fsSL -A "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36" \
+    "https://d.apkpure.com/b/XAPK/${APP_PKG}?version=latest" -o "$WORK/olight.xapk" \
+    || die "the automatic app download was refused. Re-run with PLAYSTORE=1 (install Olight from
+       Google Play inside the emulator), or download the app yourself and pass OLIGHT_APK=/path/to/file"
+  unzip -q "$WORK/olight.xapk" -d "$WORK/xapk"
+  ls "$WORK/xapk"/*.apk >/dev/null 2>&1 || die "the download was not an XAPK bundle; re-run with PLAYSTORE=1 or OLIGHT_APK=/path/to/file"
+fi
 
 # --- boot ---------------------------------------------------------------------------------------
 say "booting the emulator (this window is where you will sign in)"
@@ -89,11 +120,17 @@ adb wait-for-device
 until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 3; done
 sleep 5
 
-say "installing the app"
-# The bundle ships an arm64 split. On an x86_64 image Google's ARM translation layer runs it;
-# install-multiple takes the base plus every split in one go.
-adb install-multiple -r "$WORK"/xapk/*.apk >/dev/null
-adb shell monkey -p "$APP_PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+if [ "$PLAYSTORE" = 1 ]; then
+  echo
+  echo "  In the emulator window: open the Play Store, sign in with any Google account,"
+  echo "  install \"Olight\" and open it."
+else
+  say "installing the app"
+  # The bundle ships an arm64 split. On an x86_64 image Google's ARM translation layer runs it;
+  # install-multiple takes the base plus every split in one go.
+  adb install-multiple -r "$WORK"/xapk/*.apk >/dev/null
+  adb shell monkey -p "$APP_PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+fi
 
 # --- capture ------------------------------------------------------------------------------------
 cat <<EOF

@@ -3,7 +3,7 @@
 **Your Olight Ostation 2 Pro as a real Home Assistant device** — every bay, every cell, locally.
 No cloud, no vendor app running in the background.
 
-[![tests](https://github.com/Playcolors-co/ha-olight/actions/workflows/test.yml/badge.svg)](https://github.com/Playcolors-co/ha-olight/actions/workflows/test.yml)
+[![tests](https://github.com/seanmarpo/ha-olight/actions/workflows/test.yml/badge.svg)](https://github.com/seanmarpo/ha-olight/actions/workflows/test.yml)
 
 | | |
 |---|---|
@@ -80,7 +80,9 @@ established (the app is a Tuya app, the key is cloud-issued and pinned, etc.).
 
 ## Install
 
-**HACS** → Custom repositories → add `https://github.com/Playcolors-co/ha-olight` as an
+Requires **Home Assistant 2026.8 or newer** (tested on 2026.11).
+
+**HACS** → Custom repositories → add `https://github.com/seanmarpo/ha-olight` as an
 Integration → install → restart Home Assistant.
 
 **Manually** → copy `custom_components/olight` into your `config/custom_components/` → restart.

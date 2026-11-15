@@ -36,6 +36,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: OlightConfigEntry) -> bo
         entry.data[CONF_DEVICE_ID], entry.data[CONF_HOST], entry.data[CONF_LOCAL_KEY]
     )
     coordinator = OstationCoordinator(hass, entry, client)
+    await coordinator.async_restore()
     # Fail setup loudly if the station never answers: unlike a cloud outage this is almost always a
     # wrong local key or a changed IP, and the user needs to be told rather than left with a
     # silently empty device.

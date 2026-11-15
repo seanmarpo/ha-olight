@@ -17,6 +17,7 @@ class FakeDevice:
     def __init__(self, dev_id, host, key):
         self.args = (dev_id, host, key)
         self.replies: list = []
+        self.pushes: list = []
         self.calls: list = []
         self.closed = False
         FakeDevice.instances.append(self)
@@ -27,6 +28,16 @@ class FakeDevice:
     def set_socketRetryLimit(self, v): self.calls.append(("retry", v))
     def close(self): self.closed = True
     def heartbeat(self, nowait=False): self.calls.append(("heartbeat",))
+
+    def receive(self):
+        """Buffered pushes, oldest first; None once the buffer is empty (a read timeout)."""
+        self.calls.append(("receive",))
+        if not self.pushes:
+            return None
+        push = self.pushes.pop(0)
+        if isinstance(push, Exception):
+            raise push
+        return push
 
     def _next(self):
         reply = self.replies.pop(0)
@@ -143,7 +154,7 @@ def test_heartbeat_is_sent_only_when_connected(client, monkeypatch):
     assert c.heartbeat() is False          # nothing to keep alive yet, and no socket opened for it
     assert FakeDevice.instances == []
     c.status()
-    assert c.heartbeat() is True
+    assert c.heartbeat() is False          # sent, but nothing new arrived
     assert ("heartbeat",) in FakeDevice.instances[0].calls
 
 
@@ -160,3 +171,79 @@ def test_failed_heartbeat_drops_the_socket_so_the_next_poll_starts_clean(client,
     monkeypatch.setattr(FakeDevice, "heartbeat", lambda self, nowait=False: None)
     assert c.status() == {"101": True}     # reconnects without needing its retry
     assert len(FakeDevice.instances) == 2
+
+
+# --- The station pushes DP110/DP112 and never includes them in a status reply ------------------
+
+def test_status_reply_without_telemetry_keeps_the_last_pushed_telemetry(client, monkeypatch):
+    monkeypatch.setattr(FakeDevice, "__init__",
+                        new_device_with({"dps": {"101": True}}, {"dps": {"101": False}}))
+    c = client.OstationClient("d" * 22, "h", "k" * 16)
+    c.status()
+    FakeDevice.instances[0].pushes.append({"protocol": 4, "dps": {"110": "AA=="}})
+    assert c.heartbeat() is True
+    # The station goes quiet: the next status reply has no DP110, which must not erase it.
+    assert c.status() == {"101": False, "110": "AA=="}
+
+
+def test_push_read_in_place_of_the_status_reply_is_merged_not_returned_alone(client, monkeypatch):
+    """tinytuya returns the first buffered message: here a push, with the real reply behind it."""
+    monkeypatch.setattr(FakeDevice, "__init__",
+                        new_device_with({"protocol": 4, "dps": {"110": "AA=="}}))
+    original_status = FakeDevice.status
+
+    def status(self):
+        reply = original_status(self)
+        self.pushes.append({"dps": {"101": True, "102": 4}})  # the real reply, still buffered
+        return reply
+    monkeypatch.setattr(FakeDevice, "status", status)
+    c = client.OstationClient("d" * 22, "h", "k" * 16)
+    assert c.status() == {"101": True, "102": 4, "110": "AA=="}
+
+
+def test_pushes_buffered_between_calls_are_drained_before_the_request(client, monkeypatch):
+    monkeypatch.setattr(FakeDevice, "__init__",
+                        new_device_with({"dps": {"101": True}}, {"dps": {"101": True}}))
+    c = client.OstationClient("d" * 22, "h", "k" * 16)
+    c.status()
+    dev = FakeDevice.instances[0]
+    dev.pushes += [{"dps": {"110": "AQ=="}}, {"dps": {"110": "Ag=="}}]
+    dev.calls.clear()
+    assert c.status()["110"] == "Ag=="  # the newest push wins
+    assert dev.calls.index(("receive",)) < dev.calls.index(("status",))
+
+
+def test_seeded_values_fill_gaps_but_never_override_live_data(client, monkeypatch):
+    monkeypatch.setattr(FakeDevice, "__init__",
+                        new_device_with({"dps": {"101": True}}, {"dps": {"101": True}}))
+    c = client.OstationClient("d" * 22, "h", "k" * 16)
+    c.seed({"110": "old", "112": "AAAA"})
+    assert c.status() == {"101": True, "110": "old", "112": "AAAA"}
+    FakeDevice.instances[0].pushes.append({"dps": {"110": "new"}})
+    c.heartbeat()
+    c.seed({"110": "old"})
+    assert c.cached["110"] == "new"
+
+
+def test_cache_survives_a_reconnect(client, monkeypatch):
+    replies = iter([[{"dps": {"101": True}}], [{"dps": {"101": True}}]])
+    original_init = FakeDevice.__init__
+
+    def init(self, *a, **k):
+        original_init(self, *a, **k)
+        self.replies = next(replies)
+    monkeypatch.setattr(FakeDevice, "__init__", init)
+    c = client.OstationClient("d" * 22, "h", "k" * 16)
+    c.status()
+    FakeDevice.instances[0].pushes += [{"dps": {"110": "AA=="}}, OSError("reset by peer")]
+    assert c.heartbeat() is False          # the socket died mid-drain
+    assert c.status()["110"] == "AA=="     # a dropped socket says nothing about the cells
+
+
+def test_error_payload_while_draining_fails_the_call(client, monkeypatch):
+    monkeypatch.setattr(FakeDevice, "__init__", new_device_with({"dps": {"101": True}}))
+    c = client.OstationClient("d" * 22, "h", "k" * 16)
+    c.status()
+    FakeDevice.instances[0].pushes.append({"Error": "Network Error", "Err": "901"})
+    assert c.heartbeat() is False
+    assert FakeDevice.instances[0].closed is True

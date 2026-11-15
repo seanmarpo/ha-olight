@@ -26,4 +26,7 @@ DP_DIAGNOSTIC = 113         # int    - purpose unknown; always 0 so far; exposed
 WAKE_SENSITIVITY_MIN = 1
 WAKE_SENSITIVITY_MAX = 5
 
-UPDATE_INTERVAL_SECONDS = 15
+# A status reply never carries the bay telemetry (the station pushes that, and heartbeats collect
+# it every few seconds), so a full poll only re-confirms the station-level datapoints. No need to
+# query a low-power device more often than this.
+UPDATE_INTERVAL_SECONDS = 60

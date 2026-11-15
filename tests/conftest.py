@@ -37,8 +37,17 @@ def station_dps(**overrides) -> dict:
     return dps
 
 
+# Like the real station: these never appear in a status reply, only as pushes when they change.
+PUSH_ONLY = ("110", "112")
+
+
 class FakeTuyaDevice:
-    """Scripted stand-in for tinytuya.Device shared by every HA-level test."""
+    """Scripted stand-in for tinytuya.Device shared by every HA-level test.
+
+    `dps` is the station's true state. Mirroring the real firmware, a status reply carries only
+    the station-level datapoints; DP110/DP112 arrive through receive() as a push whenever they
+    differ from what this connection was last sent.
+    """
 
     dps: dict = {}
     fail: Exception | dict | None = None
@@ -50,6 +59,7 @@ class FakeTuyaDevice:
     def __init__(self, dev_id, host, key):
         self.args = (dev_id, host, key)
         self.closed = False
+        self.pushed: dict = {}
         FakeTuyaDevice.instances.append(self)
 
     def set_version(self, v): self.version = v
@@ -57,19 +67,37 @@ class FakeTuyaDevice:
     def set_socketTimeout(self, v): pass
     def set_socketRetryLimit(self, v): pass
     def close(self): self.closed = True
-    def heartbeat(self, nowait=False): FakeTuyaDevice.heartbeats += 1
+    def heartbeat(self, nowait=False):
+        FakeTuyaDevice.heartbeats += 1
+        return self._failure()
+
+    @staticmethod
+    def _failure():
+        if isinstance(FakeTuyaDevice.fail, Exception):
+            raise FakeTuyaDevice.fail
+        return FakeTuyaDevice.fail
+
+    def receive(self):
+        if (failure := self._failure()) is not None:
+            return failure
+        pending = {k: v for k, v in FakeTuyaDevice.dps.items()
+                   if k in PUSH_ONLY and self.pushed.get(k) != v}
+        if not pending:
+            return None
+        self.pushed.update(pending)
+        return {"protocol": 4, "t": 0, "dps": pending}
 
     def status(self):
         FakeTuyaDevice.polls += 1
-        if isinstance(FakeTuyaDevice.fail, Exception):
-            raise FakeTuyaDevice.fail
-        if isinstance(FakeTuyaDevice.fail, dict):
-            return FakeTuyaDevice.fail
-        return {"dps": dict(FakeTuyaDevice.dps)}
+        if (failure := self._failure()) is not None:
+            return failure
+        return {"dps": {k: v for k, v in FakeTuyaDevice.dps.items() if k not in PUSH_ONLY}}
 
     def set_value(self, dp, value, nowait=False):
         FakeTuyaDevice.writes.append((dp, value))
         FakeTuyaDevice.dps[str(dp)] = value
+        if str(dp) in PUSH_ONLY:
+            return None  # its new value arrives as a push
         return {"dps": {str(dp): value}}
 
 

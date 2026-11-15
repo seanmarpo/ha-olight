@@ -124,23 +124,65 @@ async def test_number_writes_an_integer(hass: HomeAssistant, fake_station) -> No
     assert fake_station.writes == [(105, 5)]
 
 
-async def test_poll_picks_up_a_cell_being_inserted(
+async def test_heartbeat_publishes_a_pushed_cell_without_waiting_for_a_poll(
         hass: HomeAssistant, fake_station) -> None:
     await _setup(hass)
     assert hass.states.get("binary_sensor.aaa1_battery_present").state == STATE_OFF
     fake_station.dps["110"] = _with_aaa1(bay(1, soc=10, mv=1210, ca=30, byte12=22))
     before = fake_station.polls
-    _advance_one_poll(hass)
+    _advance_one_heartbeat(hass)
     await hass.async_block_till_done(wait_background_tasks=True)
-    assert fake_station.polls == before + 1, "the scheduled refresh did not run"
+    assert fake_station.polls == before, "a heartbeat should not need a full status query"
     assert hass.states.get("binary_sensor.aaa1_battery_present").state == STATE_ON
     assert hass.states.get("sensor.aaa1_voltage").state == "1210"
     assert hass.states.get("sensor.aaa1_current").state == "300"
 
 
+async def test_bays_keep_their_last_reading_while_the_station_is_quiet(
+        hass: HomeAssistant, fake_station) -> None:
+    """The reported bug: status replies never carry DP110, so once the station stopped pushing
+    (charging done, station idle) every bay entity went unavailable on the next poll."""
+    await _setup(hass)
+    before = fake_station.polls
+    for _ in range(3):  # several polls, and no push in between
+        _advance_one_poll(hass)
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert fake_station.polls > before
+    assert hass.states.get("sensor.aa1_voltage").state == "1400"
+    assert hass.states.get("sensor.aa2_current").state == "500"
+    assert hass.states.get("binary_sensor.aaa1_battery_present").state == STATE_OFF
+
+
+async def test_last_bay_reading_survives_a_restart(
+        hass: HomeAssistant, fake_station, hass_storage) -> None:
+    entry = await _setup(hass)
+    assert await hass.config_entries.async_unload(entry.entry_id)  # flushes the save
+    await hass.async_block_till_done()
+    stored = hass_storage[f"{DOMAIN}.{entry.entry_id}"]["data"]
+    assert stored["110"] == fake_station.dps["110"]
+    # Back up, but the station is idle and pushes nothing: the saved reading must be shown.
+    original_init = fake_station.__init__
+
+    def quiet_init(self, *a):
+        original_init(self, *a)
+        self.pushed = dict(fake_station.dps)
+    fake_station.__init__ = quiet_init
+    try:
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    finally:
+        fake_station.__init__ = original_init
+    assert hass.states.get("sensor.aa1_voltage").state == "1400"
+    assert hass.states.get("binary_sensor.aa2_charging").state == STATE_ON
+
+
 def _advance_one_poll(hass: HomeAssistant) -> None:
     """Fire the coordinator's next scheduled refresh (it is a loop.call_at handle)."""
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=UPDATE_INTERVAL_SECONDS + 1))
+
+
+def _advance_one_heartbeat(hass: HomeAssistant) -> None:
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=HEARTBEAT_INTERVAL + 1))
 
 
 def _with_aaa1(record: bytes) -> str:

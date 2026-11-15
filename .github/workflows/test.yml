@@ -1,6 +1,16 @@
 name: test
 
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    # Branches only: a version tag runs these tests through release.yml instead.
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+  # Lets release.yml run the same checks before publishing.
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   test:

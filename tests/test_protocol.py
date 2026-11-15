@@ -29,7 +29,7 @@ PUBLISHED_DUMP = (
 def record(slot, chem=0x01, soc=100, hours=0, mins=0, mv=1400, ca=0, byte12=25):
     """Build one 17-byte bay record."""
     return bytes([slot, chem, soc, hours, mins, 0, 0, 0]) \
-        + mv.to_bytes(2, "big") + ca.to_bytes(2, "big") + bytes([byte12, 0, 0, 0, 0])
+        + mv.to_bytes(2, "big") + ca.to_bytes(2, "little") + bytes([byte12, 0, 0, 0, 0])
 
 
 def payload(*records):
@@ -69,6 +69,24 @@ def test_empty_bay_reports_none_not_zero():
     bay = slots[3]
     assert bay.occupied is False
     assert bay.soc is None and bay.voltage is None and bay.byte12 is None
+
+
+def test_real_charging_records_from_hardware_are_not_dropped():
+    """Four DP110 records captured from a real Ostation 2 Pro with Ni-MH cells charging.
+
+    The current field is little-endian (byte 10 holds the value, byte 11 is 0). Decoded big-endian
+    it read ~64000 mA and tripped the sanity ceiling, taking every bay offline. These must survive
+    and report a sane ~250 mA charge current.
+    """
+    records = {
+        1: "01010b0003000000054719003b00000000",
+        2: "02010e0003000000055718003a00000000",
+    }
+    slots = decode_slots(payload(*(bytes.fromhex(h) for h in records.values())))
+    assert set(slots) == {1, 2}
+    assert slots[1].voltage == 1351 and slots[1].current == 250 and slots[1].soc == 11
+    assert slots[2].voltage == 1367 and slots[2].current == 240 and slots[2].soc == 14
+    assert slots[1].charging and slots[2].charging
 
 
 def test_charging_is_driven_by_current():

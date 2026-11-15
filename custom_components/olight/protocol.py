@@ -24,7 +24,9 @@ RECORD_LEN = 17
 # Field offsets inside a record.
 _OFF_SLOT, _OFF_CHEM, _OFF_SOC, _OFF_HOURS, _OFF_MINS = 0, 1, 2, 3, 4
 _OFF_VOLTAGE = slice(8, 10)   # big-endian uint16, millivolts
-_OFF_CURRENT = slice(10, 12)  # big-endian uint16, tens of milliamps
+_OFF_CURRENT = slice(10, 12)  # little-endian uint16, tens of milliamps (note: opposite byte order
+                              # to voltage — confirmed against charging cells on real hardware,
+                              # where a charged-cell dump with current 0 could not reveal it)
 _OFF_BYTE12 = 12              # meaning unknown — see SlotState.byte12
 # Bytes 5-7 and 13-16 are zero for Ni-MH; upstream notes they carry something for Li-ion.
 
@@ -159,7 +161,7 @@ def decode_slots(value) -> dict[int, SlotState]:
         if slot not in SLOT_LABELS:
             continue
         voltage = _u16(rec[_OFF_VOLTAGE])
-        current = _u16(rec[_OFF_CURRENT]) * 10
+        current = int.from_bytes(rec[_OFF_CURRENT], "little") * 10
         if not _sane(voltage, current):
             _LOGGER.debug("dropping implausible DP110 record for slot %s: %s", slot, rec.hex())
             continue

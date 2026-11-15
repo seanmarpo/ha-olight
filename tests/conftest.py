@@ -18,7 +18,7 @@ HOST = "192.168.1.50"
 def bay(slot, chem=0x01, soc=100, hours=0, mins=0, mv=1400, ca=0, byte12=25) -> bytes:
     """One 17-byte DP110 record."""
     return (bytes([slot, chem, soc, hours, mins, 0, 0, 0]) + mv.to_bytes(2, "big")
-            + ca.to_bytes(2, "big") + bytes([byte12, 0, 0, 0, 0]))
+            + ca.to_bytes(2, "little") + bytes([byte12, 0, 0, 0, 0]))
 
 
 def telemetry(**overrides) -> str:

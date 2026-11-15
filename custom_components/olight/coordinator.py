@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -28,10 +29,14 @@ class OstationData:
 class OstationCoordinator(DataUpdateCoordinator[OstationData]):
     """Keeps the single LAN connection warm and hands decoded state to the entities."""
 
-    def __init__(self, hass: HomeAssistant, client: OstationClient, name: str) -> None:
-        super().__init__(hass, _LOGGER, name=f"{DOMAIN} {name}",
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, client: OstationClient) -> None:
+        # Pass the entry explicitly: the ContextVar fallback is deprecated in Home Assistant.
+        super().__init__(hass, _LOGGER, config_entry=entry, name=f"{DOMAIN} {entry.title}",
                          update_interval=timedelta(seconds=UPDATE_INTERVAL_SECONDS))
         self.client = client
+        # Registry id of the station device, used by the bays as their via_device_id. Populated in
+        # async_setup_entry once the station device is registered, before the platforms load.
+        self.station_device_id: str | None = None
 
     async def _async_update_data(self) -> OstationData:
         try:

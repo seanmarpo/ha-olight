@@ -11,10 +11,12 @@ from datetime import timedelta
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_time_interval
 
 from .const import CONF_DEVICE_ID, CONF_LOCAL_KEY, DOMAIN
 from .coordinator import OstationCoordinator
+from .entity import station_device_info
 from .tuya_client import HEARTBEAT_INTERVAL, OstationClient
 
 PLATFORMS: list[Platform] = [
@@ -33,7 +35,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: OlightConfigEntry) -> bo
     client = OstationClient(
         entry.data[CONF_DEVICE_ID], entry.data[CONF_HOST], entry.data[CONF_LOCAL_KEY]
     )
-    coordinator = OstationCoordinator(hass, client, entry.title)
+    coordinator = OstationCoordinator(hass, entry, client)
     # Fail setup loudly if the station never answers: unlike a cloud outage this is almost always a
     # wrong local key or a changed IP, and the user needs to be told rather than left with a
     # silently empty device.
@@ -41,6 +43,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: OlightConfigEntry) -> bo
 
     entry.runtime_data = coordinator
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    # Register the station device up front so the per-bay devices can link to it by registry id
+    # (via_device_id). The old DeviceInfo(via_device=...) identifier tuple is deprecated and slated
+    # for removal in HA 2027.8.
+    station_device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, **station_device_info(entry)
+    )
+    coordinator.station_device_id = station_device.id
     # The station drops a quiet socket well inside the poll interval; a keep-alive on HA's own
     # timer stops with the entry, unlike a thread.
     entry.async_on_unload(async_track_time_interval(
@@ -52,7 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: OlightConfigEntry) -> bo
 async def async_unload_entry(hass: HomeAssistant, entry: OlightConfigEntry) -> bool:
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if ok:
-        coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
-        if coordinator is not None:
-            await coordinator.async_shutdown()
+        # The coordinator was built with this entry, so HA runs its async_shutdown (closing the
+        # socket) as part of unloading; only our own bookkeeping needs undoing here.
+        hass.data[DOMAIN].pop(entry.entry_id, None)
     return ok

@@ -8,7 +8,7 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import OlightConfigEntry
 from .const import DP_AA_BIN_FULL, DP_AAA_BIN_FULL, DP_REJECT_BIN_FULL
@@ -17,7 +17,7 @@ from .protocol import SLOT_ORDER
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: OlightConfigEntry,
-                            add: AddEntitiesCallback) -> None:
+                            add: AddConfigEntryEntitiesCallback) -> None:
     c = entry.runtime_data
     entities: list[BinarySensorEntity] = [
         OlightStationBinarySensor(c, entry, "reject_bin_full", "Rejected bin full",

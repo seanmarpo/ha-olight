@@ -7,7 +7,7 @@ from datetime import time
 from homeassistant.components.time import TimeEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import OlightConfigEntry
 from .const import DP_PAUSE_WINDOW
@@ -16,7 +16,7 @@ from .protocol import decode_pause_window, encode_pause_window
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: OlightConfigEntry,
-                            add: AddEntitiesCallback) -> None:
+                            add: AddConfigEntryEntitiesCallback) -> None:
     c = entry.runtime_data
     add([
         OlightPauseTime(c, entry, "pause_start", "Quiet hours start", 0),

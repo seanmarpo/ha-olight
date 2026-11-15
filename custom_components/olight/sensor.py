@@ -17,7 +17,7 @@ from homeassistant.const import (
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import OlightConfigEntry
 from .const import DP_DIAGNOSTIC, DP_FULLY_CHARGED, DP_REJECTED
@@ -33,7 +33,7 @@ CHEMISTRY_LABELS = {
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: OlightConfigEntry,
-                            add: AddEntitiesCallback) -> None:
+                            add: AddConfigEntryEntitiesCallback) -> None:
     c = entry.runtime_data
     entities: list[SensorEntity] = [
         OlightStationSensor(c, entry, "fully_charged", "Batteries charged",

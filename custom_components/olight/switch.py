@@ -7,7 +7,7 @@ from typing import Any
 from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import OlightConfigEntry
 from .const import DP_PAUSE_ENABLED, DP_POWER
@@ -15,7 +15,7 @@ from .entity import OlightEntity
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: OlightConfigEntry,
-                            add: AddEntitiesCallback) -> None:
+                            add: AddConfigEntryEntitiesCallback) -> None:
     c = entry.runtime_data
     add([
         OlightSwitch(c, entry, "power", "Charging", DP_POWER,

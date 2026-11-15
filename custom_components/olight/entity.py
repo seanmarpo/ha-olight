@@ -26,18 +26,21 @@ def station_device_info(entry: ConfigEntry) -> DeviceInfo:
     )
 
 
-def slot_device_info(entry: ConfigEntry, slot: int) -> DeviceInfo:
+def slot_device_info(entry: ConfigEntry, slot: int, station_device_id: str) -> DeviceInfo:
     """Each bay as its own device under the station.
 
     Four bays × six readings is twenty-four entities; flat under one device that is an unreadable
     wall. Nesting them means the user opens 'AA1' and sees only that bay.
+
+    The station is linked by its device-registry id (via_device_id); the DeviceInfo(via_device=...)
+    identifier tuple it replaces is deprecated and removed in HA 2027.8.
     """
     return DeviceInfo(
         identifiers={(DOMAIN, f"{entry.data[CONF_DEVICE_ID]}_slot{slot}")},
         name=SLOT_LABELS.get(slot, f"Slot {slot}"),
         manufacturer=MANUFACTURER,
         model=f"{SLOT_SIZE.get(slot, '')} charging bay".strip(),
-        via_device=(DOMAIN, entry.data[CONF_DEVICE_ID]),
+        via_device_id=station_device_id,
     )
 
 
@@ -71,7 +74,7 @@ class OlightSlotEntity(CoordinatorEntity[OstationCoordinator]):
         self._entry = entry
         self._slot = slot
         self._attr_unique_id = f"{entry.data[CONF_DEVICE_ID]}_slot{slot}_{key}"
-        self._attr_device_info = slot_device_info(entry, slot)
+        self._attr_device_info = slot_device_info(entry, slot, coordinator.station_device_id)
 
     @property
     def _state(self) -> SlotState | None:

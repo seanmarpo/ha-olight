@@ -5,7 +5,7 @@ from __future__ import annotations
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import OlightConfigEntry
 from .const import DP_WAKE_SENSITIVITY, WAKE_SENSITIVITY_MAX, WAKE_SENSITIVITY_MIN
@@ -13,7 +13,7 @@ from .entity import OlightEntity
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: OlightConfigEntry,
-                            add: AddEntitiesCallback) -> None:
+                            add: AddConfigEntryEntitiesCallback) -> None:
     add([OlightWakeSensitivity(entry.runtime_data, entry)])
 
 

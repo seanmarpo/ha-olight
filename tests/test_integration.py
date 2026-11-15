@@ -38,10 +38,12 @@ async def test_station_and_four_bays_are_registered_as_devices(
         hass: HomeAssistant, fake_station) -> None:
     entry = await _setup(hass)
     registry = dr.async_get(hass)
-    station = registry.async_get_device(identifiers={(DOMAIN, DEVICE_ID)})
+    # async_get_device(identifiers=...) is deprecated: identifiers are only unique per config entry.
+    station = registry.async_get_device_by_identifier((DOMAIN, DEVICE_ID), entry.entry_id)
     assert station is not None and station.manufacturer == "Olight"
     for slot, label in ((3, "AA1"), (4, "AA2"), (1, "AAA1"), (2, "AAA2")):
-        d = registry.async_get_device(identifiers={(DOMAIN, f"{DEVICE_ID}_slot{slot}")})
+        d = registry.async_get_device_by_identifier(
+            (DOMAIN, f"{DEVICE_ID}_slot{slot}"), entry.entry_id)
         assert d is not None and d.name == label
         assert d.via_device_id == station.id
     ent = er.async_get(hass)

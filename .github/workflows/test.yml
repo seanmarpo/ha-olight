@@ -10,7 +10,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          # Current Home Assistant (and its test plugin) require Python 3.14.
+          python-version: "3.14"
       - run: pip install ruff pytest-homeassistant-custom-component tinytuya
       - run: python -m ruff check .
       # The decoder and client tests need no Home Assistant; the rest boot a real HA core with
